@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expense Tracker</title>
+<style>
+  :root {
+    --bg: #eef1ec; --card: #fbfcfa; --ink: #1b2a27; --muted: #66756f;
+    --line: #d5dcd5; --accent: #0f5c54; --danger: #b23a2e;
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); }
+  main { max-width: 880px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 20px; }
+  h2 { font-size: 1rem; margin: 0 0 12px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+  .total { font-size: 2.4rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); }
+  .muted { color: var(--muted); font-size: .9rem; }
+  form { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+  form .full { grid-column: 1 / -1; }
+  label { display: grid; gap: 4px; font-size: .85rem; color: var(--muted); }
+  input, select, button { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+  button { cursor: pointer; background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .bar-row { display: grid; grid-template-columns: 90px 1fr auto; gap: 8px; align-items: center; margin: 8px 0; font-size: .9rem; }
+  .bar { height: 10px; background: var(--line); border-radius: 5px; overflow: hidden; }
+  .bar span { display: block; height: 100%; background: var(--accent); }
+  .num { font-variant-numeric: tabular-nums; }
+  .toolbar { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); font-size: .92rem; }
+  td.amt, th.amt { text-align: right; }
+  td button { padding: 2px 8px; background: transparent; color: var(--danger); border-color: var(--line); }
+  .scroll { overflow-x: auto; }
+  .empty { padding: 20px 0; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Expense Tracker</h1>
+
+  <div class="grid">
+    <section class="card">
+      <div class="toolbar">
+        <h2>Spent in</h2>
+        <input type="month" id="month" aria-label="Month">
+      </div>
+      <div class="total num" id="total">0.00</div>
+      <div class="muted" id="count"></div>
+      <div id="breakdown" style="margin-top:12px"></div>
+    </section>
+
+    <section class="card">
+      <h2>Add expense</h2>
+      <form id="form">
+        <label>Amount <input type="number" id="amount" step="0.01" min="0.01" required></label>
+        <label>Date <input type="date" id="date" required></label>
+        <label>Category
+          <select id="category">
+            <option>Food</option><option>Transport</option><option>Bills</option>
+            <option>Shopping</option><option>Health</option><option>Fun</option><option>Other</option>
+          </select>
+        </label>
+        <label>Note <input type="text" id="note" maxlength="80"></label>
+        <button class="full" type="submit">Add expense</button>
+      </form>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:16px">
+    <div class="toolbar">
+      <h2>Expenses</h2>
+      <div>
+        <button class="ghost" id="export" type="button">Export CSV</button>
+        <button class="ghost" id="clear" type="button">Clear all</button>
+      </div>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Date</th><th>Category</th><th>Note</th><th class="amt">Amount</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="empty" hidden>No expenses this month. Add one above.</div>
+  </section>
+</main>
+
+<script>
+  const KEY = "expense-tracker-v1";
+  const $ = id => document.getElementById(id);
+  const fmt = n => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  let expenses = [];
+
+  try { expenses = JSON.parse(localStorage.getItem(KEY)) || []; } catch { expenses = []; }
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(expenses)); } catch {} };
+
+  const today = new Date().toISOString().slice(0, 10);
+  $("date").value = today;
+  $("month").value = today.slice(0, 7);
+
+  function render() {
+    const month = $("month").value;
+    const list = expenses.filter(e => e.date.startsWith(month)).sort((a, b) => b.date.localeCompare(a.date));
+    const total = list.reduce((s, e) => s + e.amount, 0);
+
+    $("total").textContent = fmt(total);
+    $("count").textContent = list.length + (list.length === 1 ? " expense" : " expenses");
+    $("empty").hidden = list.length > 0;
+
+    const byCat = {};
+    list.forEach(e => byCat[e.category] = (byCat[e.category] || 0) + e.amount);
+    $("breakdown").innerHTML = Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) =>
+      `<div class="bar-row"><span>${c}</span><div class="bar"><span style="width:${(v / total) * 100}%"></span></div><span class="num">${fmt(v)}</span></div>`
+    ).join("");
+
+    $("rows").innerHTML = "";
+    list.forEach(e => {
+      const tr = document.createElement("tr");
+      [e.date, e.category, e.note || ""].forEach(t => {
+        const td = document.createElement("td"); td.textContent = t; tr.appendChild(td);
+      });
+      const amt = document.createElement("td"); amt.className = "amt num"; amt.textContent = fmt(e.amount); tr.appendChild(amt);
+      const del = document.createElement("td");
+      const b = document.createElement("button"); b.textContent = "Delete"; b.setAttribute("aria-label", "Delete expense");
+      b.onclick = () => { expenses = expenses.filter(x => x.id !== e.id); save(); render(); };
+      del.appendChild(b); tr.appendChild(del);
+      $("rows").appendChild(tr);
+    });
+  }
+
+  $("form").addEventListener("submit", ev => {
+    ev.preventDefault();
+    expenses.push({
+      id: Date.now() + Math.random(),
+      amount: parseFloat($("amount").value),
+      date: $("date").value,
+      category: $("category").value,
+      note: $("note").value.trim()
+    });
+    save();
+    $("month").value = $("date").value.slice(0, 7);
+    $("amount").value = ""; $("note").value = "";
+    $("amount").focus();
+    render();
+  });
+
+  $("month").addEventListener("change", render);
+
+  $("clear").onclick = () => {
+    if (expenses.length && confirm("Delete all expenses? This can't be undone.")) { expenses = []; save(); render(); }
+  };
+
+  $("export").onclick = () => {
+    const q = s => `"${String(s).replace(/"/g, '""')}"`;
+    const csv = ["Date,Category,Note,Amount", ...expenses.map(e => [e.date, e.category, q(e.note), e.amount].join(","))].join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = "expenses.csv";
+    a.click();
+  };
+
+  render();
+</script>
+</body>
+</html>
